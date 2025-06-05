@@ -9,6 +9,7 @@ import (
 	"newtowner/internal/config"
 	"newtowner/internal/display"
 	"newtowner/internal/providers/aws"
+	"newtowner/internal/providers/azure"
 	"newtowner/internal/providers/bitbucket"
 	"newtowner/internal/providers/github"
 	gitlab "newtowner/internal/providers/gitlab"
@@ -39,6 +40,7 @@ var (
 	brightdataCountryFlag *string
 	updateDBFlag          *bool
 	awsAllRegionsFlag     *bool
+	azureAllRegionsFlag   *bool
 	sshHostFlag           *string
 	sshPortFlag           *int
 	sshUserFlag           *string
@@ -57,11 +59,12 @@ var (
 // init is run before main to set up configuration and flags.
 func init() {
 	// Define CLI flags using pflag
-	providerFlag = pflag.String("provider", "", "Name of the provider (e.g., aws, github, gitlab, bitbucket, brightdata, ssh, ec2)")
+	providerFlag = pflag.String("provider", "", "Name of the provider (e.g., aws, azure, github, gitlab, bitbucket, brightdata, ssh, ec2)")
 	urlsFilePathFlag = pflag.String("urls", "urls.txt", "Path to the file containing URLs to check (one URL per line)")
-	awsRegionFlag = pflag.String("region", "", "Optional: Specify AWS region (e.g., us-east-1). Overridden by --all-regions.")
+	awsRegionFlag = pflag.String("region", "", "Optional: Specify AWS/Azure region (e.g., us-east-1, eastus). Overridden by --all-regions.")
 	updateDBFlag = pflag.Bool("update-db", false, "Force update of the GeoLite2-City.mmdb database")
-	awsAllRegionsFlag = pflag.Bool("all-regions", false, "For AWS provider, check against all available AWS regions.")
+	awsAllRegionsFlag = pflag.Bool("all-regions", false, "For AWS/Azure provider, check against all available regions.")
+	azureAllRegionsFlag = awsAllRegionsFlag // Azure uses the same flag
 	sshHostFlag = pflag.String("ssh-host", "", "SSH host for the SSH provider")
 	sshPortFlag = pflag.Int("ssh-port", 22, "SSH port for the SSH provider")
 	sshUserFlag = pflag.String("ssh-user", "", "SSH user for the SSH provider")
@@ -104,13 +107,14 @@ func init() {
 			log.Printf("Error reading configuration file '%s': %v\n", configFileName, err)
 		}
 	}
-
 	// Bind flags to Viper
 	viper.BindPFlag("provider", pflag.Lookup("provider"))
 	viper.BindPFlag("urlsfile", pflag.Lookup("urls"))
 	viper.BindPFlag("aws_region", pflag.Lookup("region"))
+	viper.BindPFlag("azure_region", pflag.Lookup("region"))
 	viper.BindPFlag("update_db", pflag.Lookup("update-db"))
 	viper.BindPFlag("aws_all_regions", pflag.Lookup("all-regions"))
+	viper.BindPFlag("azure_all_regions", pflag.Lookup("all-regions"))
 
 	// SSH Provider Settings
 	viper.BindPFlag("ssh_host", pflag.Lookup("ssh-host"))
@@ -217,6 +221,8 @@ func main() {
 	log.Printf("  AWS Region: %s", viper.GetString("aws_region"))
 	log.Printf("  Update DB flag: %t", *updateDBFlag)
 	log.Printf("  AWS All Regions flag: %t", *awsAllRegionsFlag)
+	log.Printf("  Azure Region: %s", viper.GetString("azure_region"))
+	log.Printf("  Azure All Regions flag: %t", *azureAllRegionsFlag)
 	log.Printf("  GitHub PAT present: %t", cfg.GithubPAT != "")
 	log.Printf("  GitHub Owner: %s", cfg.GithubOwner)
 	log.Printf("  GitHub Repo: %s", cfg.GithubRepo)
@@ -232,6 +238,9 @@ func main() {
 	log.Printf("  Bitbucket Pipeline Ref: %s", cfg.BitbucketPipelineRef)
 	log.Printf("  AWS Access Key ID present: %t", cfg.AWSAccessKeyID != "")
 	log.Printf("  AWS Secret Access Key present: %t", cfg.AWSSecretAccessKey != "")
+	log.Printf("  Azure Function App Name: %s", cfg.AzureFunctionAppName)
+	log.Printf("  Azure Function Name: %s", cfg.AzureFunctionName)
+	log.Printf("  Azure Function Key present: %t", cfg.AzureFunctionKey != "")
 	log.Printf("  SSH Host: %s", cfg.SshHost)
 	log.Printf("  SSH Port: %d", cfg.SshPort)
 	log.Printf("  SSH User: %s", cfg.SshUser)
@@ -434,8 +443,32 @@ func main() {
 		log.Println("EC2 provider checks completed.")
 
 		fmt.Println(display.DefaultDisplayStyles.StyleHeader.Render(fmt.Sprintf("\nEC2 Dual SSH Provider Check Results (%d URLs processed):", len(ec2Results))))
-
 		for i, res := range ec2Results {
+			display.DisplaySingleURLCheckResult(i, res, display.DefaultDisplayStyles)
+		}
+
+	case "azure":
+		log.Println("Initializing Azure Functions provider...")
+		azureRegion := viper.GetString("azure_region")
+		if *azureAllRegionsFlag {
+			log.Println("Azure --all-regions flag is set. The specific --region flag (if any) will be ignored for region iteration.")
+		}
+
+		azureProvider, err := azure.NewProvider(ctx, cfg.AzureFunctionAppName, cfg.AzureFunctionName, cfg.AzureFunctionKey, azureRegion, *azureAllRegionsFlag)
+		if err != nil {
+			log.Fatalf("Error initializing Azure provider: %v", err)
+		}
+		log.Println("Azure provider initialized successfully.")
+
+		azureResults, err := azureProvider.CheckURLs(targetURLs)
+		if err != nil {
+			log.Fatalf("Error during Azure provider URL checks: %v", err)
+		}
+		log.Println("Azure provider checks completed.")
+
+		fmt.Println(display.DefaultDisplayStyles.StyleHeader.Render(fmt.Sprintf("\nAzure Functions Provider Check Results (%d URLs):", len(azureResults))))
+
+		for i, res := range azureResults {
 			display.DisplaySingleURLCheckResult(i, res, display.DefaultDisplayStyles)
 		}
 

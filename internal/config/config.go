@@ -26,6 +26,11 @@ type Config struct {
 	AWSAccessKeyID     string `mapstructure:"aws_access_key_id"`
 	AWSSecretAccessKey string `mapstructure:"aws_secret_access_key"`
 
+	// Azure Functions Provider Settings
+	AzureFunctionAppName string `mapstructure:"azure_function_app_name"` // Azure Function App name (without region suffix)
+	AzureFunctionName    string `mapstructure:"azure_function_name"`     // Name of the function within the app
+	AzureFunctionKey     string `mapstructure:"azure_function_key"`      // Function key for authentication
+
 	// EC2 Provider Configuration (primary instance for EC2 provider)
 	SshHost           string `mapstructure:"ssh_host"`
 	SshPort           int    `mapstructure:"ssh_port"`

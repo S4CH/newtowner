@@ -32,7 +32,7 @@ The following checks will be supported:
 | Bitbucket Pipelines | `bitbucket` | Supported         |
 | AWS API Gateway     | `aws`       | Supported         |
 | SSH/AWS EC2             | `ec2`       | Supported         |
-| Azure Functions   | `azure`     | Not yet supported |
+| Azure Functions   | `azure`     | Supported |
 
 # Usage
 
@@ -42,7 +42,14 @@ Run the tool using the following command syntax:
 ./newtowner --provider github --urls urls.txt
 ```
 
-For AWS API-Gateway by default, it will use the closest datacenter to your target URLs but this can be overridden using `--region` flag.
+For AWS API-Gateway and Azure Functions, by default, it will use the closest datacenter to your target URLs but this can be overridden using `--region` flag.
+
+Azure Functions example:
+```
+./newtowner --provider azure --urls urls.txt
+./newtowner --provider azure --region eastus --urls urls.txt
+./newtowner --provider azure --all-regions --urls urls.txt
+```
 
 # Setup
 
@@ -71,10 +78,14 @@ Modify `configuration.json` in the root of this directory. Here's a complete exa
   "bitbucket_repo_slug": "your-repository-name",
   "bitbucket_pipeline_ref": "main",
   "bitbucket_access_token": "your-workspace-access-token",
-
   // AWS API Gateway Provider
   "aws_access_key_id": "YOUR_AWS_ACCESS_KEY",
   "aws_secret_access_key": "YOUR_AWS_SECRET_KEY",
+
+  // Azure Functions Provider
+  "azure_function_app_name": "newtowner-http-check",
+  "azure_function_name": "newtowner-check",
+  "azure_function_key": "YOUR_AZURE_FUNCTION_KEY",
 
   // AWS EC2 Provider
   "ssh_host": "your-ssh-host",
@@ -245,3 +256,95 @@ The tool will:
 3. Compare the responses to identify potential trust boundary bypasses
 4. Auto-detect and display geographic information for both hosts
 5. Clean up temporary files after each check
+
+### Azure Functions
+
+The Azure Functions provider leverages Azure Functions deployed across multiple regions to test network boundaries. It automatically detects the optimal Azure region for each target URL or can test across all configured regions.
+
+#### Setup
+
+Before using the Azure provider, you need to deploy Azure Functions across multiple regions. Detailed deployment instructions are available in the [`azure-function/README.md`](azure-function/README.md) file.
+
+**Quick Setup Summary:**
+
+1. **Install Prerequisites:**
+   - Azure CLI
+   - Azure Functions Core Tools  
+   - Python 3.9+
+
+2. **Deploy Functions:**
+   ```bash
+   # Create Function Apps in multiple regions
+   REGIONS=("eastus" "westus2" "westeurope" "eastasia" "australiaeast")
+   
+   for region in "${REGIONS[@]}"; do
+     # Create resource group and function app
+     az group create --name "newtowner-${region}" --location $region
+     az functionapp create \
+       --name "newtowner-http-check-${region}" \
+       --resource-group "newtowner-${region}" \
+       --consumption-plan-location $region \
+       --runtime python --runtime-version 3.9
+   done
+   
+   # Deploy function code to each region
+   func azure functionapp publish "newtowner-http-check-eastus" --python
+   ```
+
+3. **Get Function Keys:**
+   ```bash
+   az functionapp function keys list \
+     --function-name "NewtownerHTTPCheck" \
+     --name "newtowner-http-check-eastus" \
+     --resource-group "newtowner-eastus"
+   ```
+
+#### Configuration
+
+Add Azure Functions configuration to your `configuration.json`:
+
+```json
+{
+  "azure_function_app_name": "newtowner-http-check",
+  "azure_function_name": "newtowner-check", 
+  "azure_function_key": "YOUR_AZURE_FUNCTION_KEY"
+}
+```
+
+**Configuration Fields:**
+- `azure_function_app_name`: Base name of your Function App (without region suffix)
+- `azure_function_name`: Name of the HTTP trigger function
+- `azure_function_key`: Function key for authentication
+
+#### Usage
+
+```bash
+# Smart region detection (automatically chooses best region per URL)
+./newtowner --provider azure --urls urls.txt
+
+# Test specific region
+./newtowner --provider azure --region eastus --urls urls.txt
+
+# Test all configured regions
+./newtowner --provider azure --all-regions --urls urls.txt
+```
+
+**Supported Azure Regions:**
+- East US (`eastus`)
+- West US 2 (`westus2`) 
+- West Europe (`westeurope`)
+- East Asia (`eastasia`)
+- Australia East (`australiaeast`)
+- Brazil South (`brazilsouth`)
+- Canada Central (`canadacentral`)
+- Japan East (`japaneast`)
+- North Europe (`northeurope`)
+- Southeast Asia (`southeastasia`)
+
+#### Features
+
+- **Smart Region Detection**: Automatically selects the geographically closest Azure region for each target URL
+- **Multi-Region Testing**: Test the same URLs from multiple Azure regions simultaneously  
+- **Cost Efficient**: Uses Azure Functions Consumption Plan (pay-per-execution)
+- **Detailed Logging**: Comprehensive logging of HTTP responses, SSL certificates, and execution metrics
+- **Geographic Distribution**: Global coverage across major geographic regions
